@@ -130,7 +130,7 @@ pub use crate::splitting::{HyphenSplitter, NoHyphenation, WordSplitter};
 /// line) so that the overall time and memory complexity is O(*n*) where
 /// *n* is the length of the input string.
 #[derive(Clone, Debug)]
-pub struct Wrapper<'a, S: WordSplitter> {
+pub struct Wrapper<'a, S: ?Sized + WordSplitter> {
     /// The width in columns at which the text will be wrapped.
     pub width: usize,
     /// Indentation used for the first line of output.
@@ -257,6 +257,9 @@ impl<'a, S: WordSplitter> Wrapper<'a, S> {
             ..self
         }
     }
+}
+
+impl<'a, S: ?Sized + WordSplitter> Wrapper<'a, S> {
 
     /// Fill a line of text at `self.width` characters.
     ///
@@ -381,6 +384,9 @@ impl<'a, S: WordSplitter> Wrapper<'a, S> {
         }
     }
 
+}
+
+impl<'a, S: WordSplitter> Wrapper<'a, S> {
     /// Lazily wrap a line of text at `self.width` characters.
     ///
     /// The [`WordSplitter`] stored in [`self.splitter`] is used
@@ -454,12 +460,12 @@ impl<'a, S: WordSplitter> Iterator for IntoWrapIter<'a, S> {
 ///
 /// [`Wrapper::wrap_iter`]: struct.Wrapper.html#method.wrap_iter
 #[derive(Debug)]
-pub struct WrapIter<'w, 'a: 'w, S: WordSplitter> {
+pub struct WrapIter<'w, 'a: 'w, S: ?Sized + WordSplitter> {
     wrapper: &'w Wrapper<'a, S>,
     inner: WrapIterImpl<'a>,
 }
 
-impl<'w, 'a: 'w, S: WordSplitter> Iterator for WrapIter<'w, 'a, S> {
+impl<'w, 'a: 'w, S: ?Sized + WordSplitter> Iterator for WrapIter<'w, 'a, S> {
     type Item = Cow<'a, str>;
 
     fn next(&mut self) -> Option<Cow<'a, str>> {
@@ -497,7 +503,7 @@ struct WrapIterImpl<'a> {
 }
 
 impl<'a> WrapIterImpl<'a> {
-    fn new<S: WordSplitter>(wrapper: &Wrapper<'a, S>, s: &'a str) -> WrapIterImpl<'a> {
+    fn new<S: ?Sized + WordSplitter>(wrapper: &Wrapper<'a, S>, s: &'a str) -> WrapIterImpl<'a> {
         WrapIterImpl {
             source: s,
             char_indices: s.char_indices(),
@@ -511,7 +517,7 @@ impl<'a> WrapIterImpl<'a> {
         }
     }
 
-    fn create_result_line<S: WordSplitter>(&self, wrapper: &Wrapper<'a, S>) -> Cow<'a, str> {
+    fn create_result_line<S: ?Sized + WordSplitter>(&self, wrapper: &Wrapper<'a, S>) -> Cow<'a, str> {
         if self.start == 0 {
             Cow::from(wrapper.initial_indent)
         } else {
@@ -519,7 +525,7 @@ impl<'a> WrapIterImpl<'a> {
         }
     }
 
-    fn next<S: WordSplitter>(&mut self, wrapper: &Wrapper<'a, S>) -> Option<Cow<'a, str>> {
+    fn next<S: ?Sized + WordSplitter>(&mut self, wrapper: &Wrapper<'a, S>) -> Option<Cow<'a, str>> {
         if self.finished {
             return None;
         }
@@ -1100,5 +1106,49 @@ mod tests {
             fill(&(String::from(green_hello) + " " + &blue_world), 6),
             String::from(green_hello) + "\n" + &blue_world
         );
+    }
+
+    #[test]
+    fn boxing_outside() {
+		// Type annotations here are mostly commendatory (except for the dyn_ref)
+
+        let opt: Wrapper<NoHyphenation> = Wrapper::with_splitter(10, NoHyphenation);
+
+		let boxed: Box<Wrapper<NoHyphenation>> = Box::new(opt);
+
+		let mut dyn_box: Box<Wrapper<dyn WordSplitter>> = boxed;
+
+		// Using coercion to reference
+		let dyn_ref: &Wrapper<dyn WordSplitter> = &dyn_box;
+	    assert_eq!(dyn_ref.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
+
+		// Replacing NoHyphenation with HyphenSplitter, without changing the type
+		dyn_box =  Box::new(Wrapper::new(10));
+
+		// Using deref
+        assert_eq!(dyn_box.wrap("foo bar-baz"), vec!["foo bar-","baz"]);
+    }
+
+    #[test]
+    fn rcing_outside() {
+		use std::rc::Rc;
+
+		// Type annotations here are mostly commendatory (except for the dyn_ref)
+
+        let opt: Wrapper<NoHyphenation> = Wrapper::with_splitter(10, NoHyphenation);
+
+		let rced: Rc<Wrapper<NoHyphenation>> = Rc::new(opt);
+
+		let mut dyn_rc: Rc<Wrapper<dyn WordSplitter>> = rced;
+
+		// Using coercion to reference
+		let dyn_ref: &Wrapper<dyn WordSplitter> = &dyn_rc;
+	    assert_eq!(dyn_ref.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
+
+		// Replacing NoHyphenation with HyphenSplitter, without changing the type
+		dyn_rc =  Rc::new(Wrapper::new(10));
+
+		// Using deref
+        assert_eq!(dyn_rc.wrap("foo bar-baz"), vec!["foo bar-","baz"]);
     }
 }
