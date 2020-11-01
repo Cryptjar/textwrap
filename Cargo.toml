@@ -41,3 +41,6 @@ criterion = "0.3"
 [target.'cfg(unix)'.dev-dependencies]
 termion = "1.5"
 
+
+[patch.crates-io]
+hyphenation = { git = "https://github.com/Cryptjar/hyphenation.git" }

@@ -140,12 +140,12 @@ mod unix_only {
             dyn for<'a> Fn(&'_ Wrapper<'a, dyn WordSplitter>) -> Box<Wrapper<'a, dyn WordSplitter>>,
         >;
 
-        let labels = vec![
+        let mut labels = vec![
             String::from("HyphenSplitter"),
             String::from("NoHyphenation"),
         ];
 
-        let splitters: Vec<SplitterChanger> = vec![
+        let mut splitters: Vec<SplitterChanger> = vec![
             Box::new(|w| Box::new(w.splitter(HyphenSplitter))),
             Box::new(|w| Box::new(w.splitter(NoHyphenation))),
         ];
@@ -165,7 +165,7 @@ mod unix_only {
 
             if let Ok(dict) = dictionary {
                 labels.push(format!("{} hyphenation", lang.code()));
-                splitters.push(Box::new(dict));
+                splitters.push(Box::new(move |w| Box::new(w.splitter(dict.clone()))));
             }
         }
 
