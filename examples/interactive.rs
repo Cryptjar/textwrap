@@ -19,7 +19,7 @@ mod unix_only {
     use termion::raw::{IntoRawMode, RawTerminal};
     use termion::screen::AlternateScreen;
     use termion::{color, cursor, style};
-    use textwrap::{wrap, HyphenSplitter, NoHyphenation, Options, WordSplitter};
+    use textwrap::{wrap, HyphenSplitter, NoHyphenation, WordSplitter, Wrapper};
 
     #[cfg(feature = "hyphenation")]
     use hyphenation::{Language, Load, Standard};
@@ -54,7 +54,7 @@ mod unix_only {
 
     fn draw_text<'a>(
         text: &str,
-        options: &Options<'a>,
+        options: &Wrapper<'a, dyn WordSplitter>,
         splitter_label: &str,
         stdout: &mut RawTerminal<io::Stdout>,
     ) -> Result<(), io::Error> {
@@ -101,7 +101,7 @@ mod unix_only {
         )?;
         row += 2;
 
-        let mut lines = wrap(text, options).collect::<Vec<_>>();
+        let mut lines = options.wrap(text);
         if let Some(line) = lines.last() {
             // If `text` ends with a newline, the final wrapped line
             // contains this newline. This will in turn leave the
@@ -136,13 +136,19 @@ mod unix_only {
     pub fn main() -> Result<(), io::Error> {
         let initial_width = 20;
 
-        let mut labels = vec![
+        type SplitterChanger = Box<
+            dyn for<'a> Fn(&'_ Wrapper<'a, dyn WordSplitter>) -> Box<Wrapper<'a, dyn WordSplitter>>,
+        >;
+
+        let labels = vec![
             String::from("HyphenSplitter"),
             String::from("NoHyphenation"),
         ];
 
-        let mut splitters: Vec<Box<dyn WordSplitter>> =
-            vec![Box::new(HyphenSplitter), Box::new(NoHyphenation)];
+        let splitters: Vec<SplitterChanger> = vec![
+            Box::new(|w| Box::new(w.splitter(HyphenSplitter))),
+            Box::new(|w| Box::new(w.splitter(NoHyphenation))),
+        ];
 
         // If you like, you can download more dictionaries from
         // https://github.com/tapeinosyne/hyphenation/tree/master/dictionaries
@@ -163,12 +169,18 @@ mod unix_only {
             }
         }
 
-        let mut label = labels.pop().unwrap();
-        let mut options = Options::new(initial_width);
-        options.break_words = false;
-        options.splitter = splitters.pop().unwrap();
-
         let mut idx_iter = (0..splitters.len()).collect::<Vec<_>>().into_iter().cycle();
+
+        let (mut label, mut options) = {
+            let idx = idx_iter.next().unwrap();
+
+            let label = labels[idx].clone();
+            let mut options: Box<Wrapper<dyn WordSplitter>> =
+                Box::new(Wrapper::new(initial_width).break_words(false));
+            options = splitters[idx](&options);
+
+            (label, options)
+        };
 
         let mut text = String::from(
             "Welcome to the interactive word-wrapping demo! Use the arrow \
@@ -188,8 +200,8 @@ mod unix_only {
                 Key::Ctrl('b') => options.break_words = !options.break_words,
                 Key::Ctrl('s') => {
                     let idx = idx_iter.next().unwrap();
-                    std::mem::swap(&mut options.splitter, &mut splitters[idx]);
-                    std::mem::swap(&mut label, &mut labels[idx]);
+                    options = splitters[idx](&options);
+                    label = labels[idx].clone();
                 }
                 Key::Char(c) => text.push(c),
                 Key::Backspace => {

@@ -89,7 +89,7 @@
 //! [`WordSplitter`]: trait.WordSplitter.html
 
 #![doc(html_root_url = "https://docs.rs/textwrap/0.12.1")]
-#![deny(missing_docs)]
+#![warn(missing_docs)]
 #![deny(missing_debug_implementations)]
 #![allow(clippy::redundant_field_names)]
 
@@ -130,7 +130,7 @@ pub use crate::splitting::{HyphenSplitter, NoHyphenation, WordSplitter};
 /// line) so that the overall time and memory complexity is O(*n*) where
 /// *n* is the length of the input string.
 #[derive(Clone, Debug)]
-pub struct Wrapper<'a, S: ?Sized + WordSplitter> {
+pub struct Wrapper<'a, S: ?Sized> {
     /// The width in columns at which the text will be wrapped.
     pub width: usize,
     /// Indentation used for the first line of output.
@@ -155,7 +155,7 @@ impl<'a> Wrapper<'a, HyphenSplitter> {
     ///
     /// [`HyphenSplitter`]: struct.HyphenSplitter.html
     /// [`WordSplitter`]: trait.WordSplitter.html
-    pub fn new(width: usize) -> Wrapper<'a, HyphenSplitter> {
+    pub const fn new(width: usize) -> Wrapper<'a, HyphenSplitter> {
         Wrapper::with_splitter(width, HyphenSplitter)
     }
 
@@ -182,13 +182,13 @@ impl<'a> Wrapper<'a, HyphenSplitter> {
     }
 }
 
-impl<'a, S: WordSplitter> Wrapper<'a, S> {
+impl<'a, S> Wrapper<'a, S> {
     /// Use the given [`WordSplitter`] to create a new Wrapper for
     /// wrapping at the specified width. By default, we allow words
     /// longer than `width` to be broken.
     ///
     /// [`WordSplitter`]: trait.WordSplitter.html
-    pub fn with_splitter(width: usize, splitter: S) -> Wrapper<'a, S> {
+    pub const fn with_splitter(width: usize, splitter: S) -> Wrapper<'a, S> {
         Wrapper {
             width: width,
             initial_indent: "",
@@ -197,7 +197,21 @@ impl<'a, S: WordSplitter> Wrapper<'a, S> {
             splitter: splitter,
         }
     }
+}
 
+impl<'a, S: ?Sized> Wrapper<'a, S> {
+    pub const fn splitter<T>(&self, splitter: T) -> Wrapper<'a, T> {
+        Wrapper {
+            width: self.width,
+            initial_indent: self.initial_indent,
+            subsequent_indent: self.subsequent_indent,
+            break_words: self.break_words,
+            splitter: splitter,
+        }
+    }
+}
+
+impl<'a, S: WordSplitter> Wrapper<'a, S> {
     /// Change [`self.initial_indent`]. The initial indentation is
     /// used on the very first line of output.
     ///
@@ -260,7 +274,6 @@ impl<'a, S: WordSplitter> Wrapper<'a, S> {
 }
 
 impl<'a, S: ?Sized + WordSplitter> Wrapper<'a, S> {
-
     /// Fill a line of text at `self.width` characters.
     ///
     /// The result is a string with newlines between each line. Use
@@ -383,7 +396,6 @@ impl<'a, S: ?Sized + WordSplitter> Wrapper<'a, S> {
             inner: WrapIterImpl::new(self, s),
         }
     }
-
 }
 
 impl<'a, S: WordSplitter> Wrapper<'a, S> {
@@ -517,7 +529,10 @@ impl<'a> WrapIterImpl<'a> {
         }
     }
 
-    fn create_result_line<S: ?Sized + WordSplitter>(&self, wrapper: &Wrapper<'a, S>) -> Cow<'a, str> {
+    fn create_result_line<S: ?Sized + WordSplitter>(
+        &self,
+        wrapper: &Wrapper<'a, S>,
+    ) -> Cow<'a, str> {
         if self.start == 0 {
             Cow::from(wrapper.initial_indent)
         } else {
@@ -1109,46 +1124,72 @@ mod tests {
     }
 
     #[test]
+    fn static_splitter() {
+        static HYP: Wrapper<HyphenSplitter> = Wrapper::new(10);
+
+        static NO_HYP: Wrapper<NoHyphenation> = HYP.splitter(NoHyphenation);
+
+        static NO_HYP_2: Wrapper<NoHyphenation> = Wrapper::new(20).splitter(NoHyphenation);
+
+        assert_eq!(NO_HYP.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
+        assert_eq!(NO_HYP_2.wrap("foo bar-baz"), vec!["foo bar-baz"]);
+    }
+
+    #[test]
     fn boxing_outside() {
-		// Type annotations here are mostly commendatory (except for the dyn_ref)
+        // Type annotations here are mostly commendatory (except for the dyn_ref)
 
         let opt: Wrapper<NoHyphenation> = Wrapper::with_splitter(10, NoHyphenation);
 
-		let boxed: Box<Wrapper<NoHyphenation>> = Box::new(opt);
+        let boxed: Box<Wrapper<NoHyphenation>> = Box::new(opt);
 
-		let mut dyn_box: Box<Wrapper<dyn WordSplitter>> = boxed;
+        let mut dyn_box: Box<Wrapper<dyn WordSplitter>> = boxed;
 
-		// Using coercion to reference
-		let dyn_ref: &Wrapper<dyn WordSplitter> = &dyn_box;
-	    assert_eq!(dyn_ref.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
+        // Using coercion to reference
+        let dyn_ref: &Wrapper<dyn WordSplitter> = &dyn_box;
+        assert_eq!(dyn_ref.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
 
-		// Replacing NoHyphenation with HyphenSplitter, without changing the type
-		dyn_box =  Box::new(Wrapper::new(10));
+        // Replacing NoHyphenation with HyphenSplitter, without changing the type
+        dyn_box = Box::new(Wrapper::new(10));
 
-		// Using deref
-        assert_eq!(dyn_box.wrap("foo bar-baz"), vec!["foo bar-","baz"]);
+        // Using deref
+        assert_eq!(dyn_box.wrap("foo bar-baz"), vec!["foo bar-", "baz"]);
+    }
+
+    #[test]
+    fn boxing_outside_replace_splitter() {
+        // Type annotations here are mostly commendatory (except for the dyn_ref)
+
+        let mut dyn_box: Box<Wrapper<dyn WordSplitter>> = Box::new(Wrapper::new(10));
+
+        assert_eq!(dyn_box.wrap("foo bar-baz"), vec!["foo bar-", "baz"]);
+
+        // Just replace the splitter keeping the rest of the configuration in place
+        dyn_box = Box::new(dyn_box.splitter(NoHyphenation));
+
+        assert_eq!(dyn_box.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
     }
 
     #[test]
     fn rcing_outside() {
-		use std::rc::Rc;
+        use std::rc::Rc;
 
-		// Type annotations here are mostly commendatory (except for the dyn_ref)
+        // Type annotations here are mostly commendatory (except for the dyn_ref)
 
         let opt: Wrapper<NoHyphenation> = Wrapper::with_splitter(10, NoHyphenation);
 
-		let rced: Rc<Wrapper<NoHyphenation>> = Rc::new(opt);
+        let rced: Rc<Wrapper<NoHyphenation>> = Rc::new(opt);
 
-		let mut dyn_rc: Rc<Wrapper<dyn WordSplitter>> = rced;
+        let mut dyn_rc: Rc<Wrapper<dyn WordSplitter>> = rced;
 
-		// Using coercion to reference
-		let dyn_ref: &Wrapper<dyn WordSplitter> = &dyn_rc;
-	    assert_eq!(dyn_ref.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
+        // Using coercion to reference
+        let dyn_ref: &Wrapper<dyn WordSplitter> = &dyn_rc;
+        assert_eq!(dyn_ref.wrap("foo bar-baz"), vec!["foo", "bar-baz"]);
 
-		// Replacing NoHyphenation with HyphenSplitter, without changing the type
-		dyn_rc =  Rc::new(Wrapper::new(10));
+        // Replacing NoHyphenation with HyphenSplitter, without changing the type
+        dyn_rc = Rc::new(Wrapper::new(10));
 
-		// Using deref
-        assert_eq!(dyn_rc.wrap("foo bar-baz"), vec!["foo bar-","baz"]);
+        // Using deref
+        assert_eq!(dyn_rc.wrap("foo bar-baz"), vec!["foo bar-", "baz"]);
     }
 }
